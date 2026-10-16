@@ -2,6 +2,9 @@ import type { CSSProperties, ReactNode } from 'react'
 import { Lexer, type Token, type Tokens } from 'marked'
 
 function safeHref(href: string) {
+  const workspaceImage = href.match(/^(?:file:\/\/)?\/(?:[^/]+\/)*\.ediora\/codex_work\/(.+)$/)
+  if (workspaceImage) return `/api/chat/workspace-image?path=${encodeURIComponent(workspaceImage[1])}`
+  if (href.startsWith('/api/uploads/')) return `/_ediora-api${href.slice(4)}`
   try {
     const url = new URL(href, 'https://ediora.local')
     return ['http:', 'https:', 'mailto:'].includes(url.protocol) || href.startsWith('/') || href.startsWith('#')
@@ -36,8 +39,14 @@ function renderInline(token: Token): ReactNode {
         ? <a className="text-indigo-600 underline underline-offset-2 hover:text-indigo-500 dark:text-indigo-400" href={href} target="_blank" rel="noreferrer">{inline(nestedTokens(token))}</a>
         : <>{inline(nestedTokens(token))}</>
     }
-    case 'image':
-      return <span>{token.text}</span>
+    case 'image': {
+      const src = safeHref(token.href)
+      if (!src || !/^https?:\/\/|^\/(?!\/)/i.test(src)) return <span>{token.text}</span>
+      return <a href={src} target="_blank" rel="noreferrer">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={src} alt={token.text} title={token.title ?? undefined} loading="lazy" className="my-2 max-h-[32rem] max-w-full rounded-lg object-contain" />
+      </a>
+    }
     case 'br':
       return <br />
     case 'html':

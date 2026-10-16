@@ -1,3 +1,5 @@
+import { join } from 'node:path'
+
 import {
   CODEX_THREAD_CWD,
   DEFAULT_CODEX_MODEL,
@@ -270,7 +272,7 @@ export async function runCodexAgentTurn(
         title: options.clientInfo?.title ?? DEFAULT_CLIENT_INFO.title,
         version: options.clientInfo?.version ?? DEFAULT_CLIENT_INFO.version,
       },
-      capabilities: null,
+      capabilities: { experimentalApi: true },
     }))
     await writeMessage({ method: 'initialized' })
 
@@ -280,12 +282,31 @@ export async function runCodexAgentTurn(
     const cwd = options.cwd && options.cwd !== CODEX_THREAD_CWD
       ? options.cwd
       : ensureCodexThreadCwd()
-    const threadParams: Record<string, unknown> = { model, sandbox, cwd }
+    const threadParams: Record<string, unknown> = { model, cwd }
+    const config: Record<string, unknown> = {}
+    if (sandbox === 'workspace-write') {
+      // Use a named profile to explicitly allow workspace metadata directories;
+      // legacy workspace-write always protects these even with writableRoots.
+      threadParams.permissions = 'ediora-workspace'
+      config.default_permissions = 'ediora-workspace'
+      config.permissions = {
+        'ediora-workspace': {
+          extends: ':workspace',
+          filesystem: Object.fromEntries(
+            ['.agents', '.codex', '.git', '.aws'].map(name => [join(cwd, name), 'write']),
+          ),
+          network: { enabled: true },
+        },
+      }
+    } else {
+      threadParams.sandbox = sandbox
+    }
     if (selectedModel.modelProvider) threadParams.modelProvider = selectedModel.modelProvider
     if (options.approvalPolicy) threadParams.approvalPolicy = options.approvalPolicy
     if (options.mcpServers && Object.keys(options.mcpServers).length > 0) {
-      threadParams.config = { mcp_servers: options.mcpServers }
+      config.mcp_servers = options.mcpServers
     }
+    if (Object.keys(config).length > 0) threadParams.config = config
 
     let threadId = options.threadId
     if (threadId) {

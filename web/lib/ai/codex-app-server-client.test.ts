@@ -16,7 +16,6 @@ import {
   resolveCodexHome,
   CODEX_THREAD_CWD,
   DEFAULT_CODEX_MODEL,
-  DEFAULT_CODEX_SANDBOX,
   codexAppServerSpawnOptions,
   connectCodexAppServer,
   spawnCodexAppServerTransport,
@@ -51,6 +50,7 @@ describe('Codex app-server client', () => {
 
     const initialize = requestByMethod(peer, 'initialize')
     expect(initialize?.params).toEqual(expect.objectContaining({
+      capabilities: { experimentalApi: true },
       clientInfo: expect.objectContaining({
         name: expect.any(String),
         version: expect.any(String),
@@ -64,8 +64,18 @@ describe('Codex app-server client', () => {
       model: threadModel.model,
       modelProvider: threadModel.modelProvider,
     }))
-    expect(CODEX_SANDBOX_MODES).toContain(threadStart?.params?.sandbox)
-    expect(threadStart?.params?.sandbox).toBe(DEFAULT_CODEX_SANDBOX)
+    expect(threadStart?.params?.sandbox).toBeUndefined()
+    expect(threadStart?.params?.permissions).toBe('ediora-workspace')
+    expect(threadStart?.params?.config).toEqual({
+      default_permissions: 'ediora-workspace',
+      permissions: {
+        'ediora-workspace': {
+          extends: ':workspace',
+          filesystem: Object.fromEntries(['.agents', '.codex', '.git', '.aws'].map(name => [join(CODEX_THREAD_CWD, name), 'write'])),
+          network: { enabled: true },
+        },
+      },
+    })
 
     const turnStart = requestByMethod(peer, 'turn/start')
     expect(turnStart?.params).toEqual(expect.objectContaining({
@@ -106,9 +116,11 @@ describe('Codex app-server client', () => {
       model: 'deepseek-v4-flash',
       modelProvider: 'proxy',
     }))
-    expect(CODEX_SANDBOX_MODES).toContain(
-      requestByMethod(peer, 'thread/resume')?.params?.sandbox,
-    )
+    expect(requestByMethod(peer, 'thread/resume')?.params?.permissions).toBe('ediora-workspace')
+    expect(requestByMethod(peer, 'thread/resume')?.params?.sandbox).toBeUndefined()
+    expect(requestByMethod(peer, 'thread/resume')?.params?.config).toMatchObject({
+      default_permissions: 'ediora-workspace',
+    })
     expect(requestByMethod(peer, 'turn/start')?.params).toEqual(expect.objectContaining({
       threadId: 'thr_existing',
       input: expect.arrayContaining([
@@ -152,7 +164,7 @@ describe('Codex app-server client', () => {
     expect(requestByMethod(peer, 'thread/start')?.params).not.toHaveProperty('modelProvider')
   })
 
-  it('sends a valid SandboxMode on thread/start even when callers pass the camelCase alias', async () => {
+  it('applies workspace permissions even when callers pass the camelCase alias', async () => {
     const peer = createScriptedCodexPeer({ agentText: 'ok' })
 
     await runCodexAgentTurn({
@@ -165,8 +177,18 @@ describe('Codex app-server client', () => {
 
     const sandbox = requestByMethod(peer, 'thread/start')?.params?.sandbox
     expect(CODEX_SANDBOX_MODES).toEqual(['workspace-write', 'read-only', 'danger-full-access'])
-    expect(CODEX_SANDBOX_MODES).toContain(sandbox)
-    expect(sandbox).not.toBe('workspaceWrite')
+    expect(sandbox).toBeUndefined()
+    expect(requestByMethod(peer, 'thread/start')?.params?.permissions).toBe('ediora-workspace')
+    expect(requestByMethod(peer, 'thread/start')?.params?.config).toMatchObject({
+      permissions: { 'ediora-workspace': { filesystem: { [join(process.cwd(), '.agents')]: 'write' }, network: { enabled: true } } },
+    })
+  })
+
+  it.each(['read-only', 'danger-full-access'])('preserves an explicit %s sandbox without adding workspace permissions', async sandbox => {
+    const peer = createScriptedCodexPeer({ agentText: 'ok' })
+    await runCodexAgentTurn({ transport: peer.transport, input: 'hello', sandbox })
+    expect(requestByMethod(peer, 'thread/start')?.params?.sandbox).toBe(sandbox)
+    expect(requestByMethod(peer, 'thread/start')?.params).not.toHaveProperty('permissions')
   })
 
   it('uses an explicit model override on thread and turn start', async () => {
@@ -223,7 +245,7 @@ describe('Codex app-server client', () => {
     })
 
     expect(requestByMethod(peer, 'thread/start')?.params).toEqual(expect.objectContaining({
-      config: { mcp_servers: mcpServers },
+      config: expect.objectContaining({ mcp_servers: mcpServers, permissions: expect.any(Object) }),
     }))
     expect(requestByMethod(peer, 'turn/start')?.params).not.toHaveProperty('config')
   })

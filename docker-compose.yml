@@ -55,6 +55,9 @@ services:
   app:
     <<: *app-image
     user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    # Allow Codex bubblewrap to create its nested user namespace.
+    security_opt:
+      - seccomp=unconfined
     restart: unless-stopped
     build:
       context: .
@@ -84,6 +87,7 @@ services:
       API_URL: http://127.0.0.1:8000/api
       CODEX_HOME: /codex-home
     volumes:
+      - ./data/codex-workspace:/tmp/.ediora/codex_work
       - ./data/uploads:/app/uploads
       - ./data/sessions:/app/sessions
       - ./data/avatars:/app/avatars
