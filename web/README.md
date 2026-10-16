@@ -27,6 +27,12 @@ export WORKER_TOKEN="$(openssl rand -hex 32)"
 `127.0.0.1` 与 `localhost` 地址。完整启动、ready 文件格式、端口覆盖和
 进程所有权规则见项目根目录 `README.md`。
 
+## Codex 工作空间权限
+
+Codex 工作会话使用 `ediora-workspace` 命名权限配置（Codex 0.162.1）：
+允许工作目录及其中的 `.agents`、`.codex`、`.git`、`.aws` 写入，并启用网络访问。
+创建和恢复会话均应用此配置；显式指定的只读沙箱仍保持只读。
+
 ## 文字视频本地配置
 
 MiMo 语音凭据只保留在服务端，官方 base URL 为
