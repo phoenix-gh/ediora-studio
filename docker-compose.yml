@@ -55,6 +55,9 @@ services:
   app:
     <<: *app-image
     user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    # Allow Codex bubblewrap to create its nested user namespace.
+    security_opt:
+      - seccomp=unconfined
     restart: unless-stopped
     build:
       context: .

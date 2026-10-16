@@ -494,7 +494,8 @@ describe('daily creation Agent job', () => {
       model: threadModel.model,
       modelProvider: threadModel.modelProvider,
       cwd: CODEX_THREAD_CWD,
-      config: { mcp_servers: mcpServers },
+      permissions: 'ediora-workspace',
+      config: expect.objectContaining({ mcp_servers: mcpServers, permissions: expect.any(Object) }),
     }))
     expect(requestByMethod(harness.lastPeer!, 'turn/start')?.params).not.toHaveProperty('config')
     expect(requestByMethod(harness.lastPeer!, 'turn/start')?.params).toEqual(expect.objectContaining({
