@@ -523,6 +523,7 @@ prepare_data_directories() {
     "$data_dir/uploads" \
     "$data_dir/sessions" \
     "$data_dir/web-runtime" \
+    "$data_dir/codex-workspace" \
     "$data_dir/scheduler" \
     "$data_dir/avatars" \
     "$data_dir/wechat-images" \

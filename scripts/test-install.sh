@@ -461,6 +461,7 @@ test_installer_creates_data_directories() {
     data/uploads \
     data/sessions \
     data/web-runtime \
+    data/codex-workspace \
     data/scheduler \
     data/avatars \
     data/wechat-images \

@@ -87,6 +87,7 @@ services:
       API_URL: http://127.0.0.1:8000/api
       CODEX_HOME: /codex-home
     volumes:
+      - ./data/codex-workspace:/tmp/.ediora/codex_work
       - ./data/uploads:/app/uploads
       - ./data/sessions:/app/sessions
       - ./data/avatars:/app/avatars
