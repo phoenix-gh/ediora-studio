@@ -32,6 +32,8 @@ export WORKER_TOKEN="$(openssl rand -hex 32)"
 Codex 工作会话使用 `ediora-workspace` 命名权限配置（Codex 0.162.1）：
 允许工作目录及其中的 `.agents`、`.codex`、`.git`、`.aws` 写入，并启用网络访问。
 创建和恢复会话均应用此配置；显式指定的只读沙箱仍保持只读。
+Compose 将工作区保存到 `data/codex-workspace`，保留生成的图片和项目技能。
+聊天中的 Markdown 图片可直接预览；本地图片仅允许读取该工作区中的 PNG、JPEG、WebP、GIF 和 AVIF 文件。
 
 ## 文字视频本地配置
 
