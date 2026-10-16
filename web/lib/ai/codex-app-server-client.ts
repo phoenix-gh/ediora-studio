@@ -288,6 +288,7 @@ export async function runCodexAgentTurn(
       // Use a named profile to explicitly allow workspace metadata directories;
       // legacy workspace-write always protects these even with writableRoots.
       threadParams.permissions = 'ediora-workspace'
+      config.default_permissions = 'ediora-workspace'
       config.permissions = {
         'ediora-workspace': {
           extends: ':workspace',

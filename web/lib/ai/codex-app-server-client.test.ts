@@ -67,6 +67,7 @@ describe('Codex app-server client', () => {
     expect(threadStart?.params?.sandbox).toBeUndefined()
     expect(threadStart?.params?.permissions).toBe('ediora-workspace')
     expect(threadStart?.params?.config).toEqual({
+      default_permissions: 'ediora-workspace',
       permissions: {
         'ediora-workspace': {
           extends: ':workspace',
@@ -117,6 +118,9 @@ describe('Codex app-server client', () => {
     }))
     expect(requestByMethod(peer, 'thread/resume')?.params?.permissions).toBe('ediora-workspace')
     expect(requestByMethod(peer, 'thread/resume')?.params?.sandbox).toBeUndefined()
+    expect(requestByMethod(peer, 'thread/resume')?.params?.config).toMatchObject({
+      default_permissions: 'ediora-workspace',
+    })
     expect(requestByMethod(peer, 'turn/start')?.params).toEqual(expect.objectContaining({
       threadId: 'thr_existing',
       input: expect.arrayContaining([
