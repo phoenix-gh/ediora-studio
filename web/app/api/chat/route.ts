@@ -16,6 +16,7 @@ import { baoyuRuntimeInstructions } from '@/lib/ai/content-job'
 import { type AgentRunResult, type AgentSessionEventDraft } from '@/lib/ai/agent-runtime'
 import { CODEX_THREAD_CWD } from '@/lib/ai/codex-app-server'
 import { runCodexAgentTurn } from '@/lib/ai/codex-app-server-client'
+import { beginChatTurn } from '@/lib/ai/chat-turn-control'
 import { codexThreadId, codexThreadTurnOptions } from '@/lib/ai/codex-thread'
 import { codexImageMessageParts, publishCodexGeneratedImages } from '@/lib/ai/codex-generated-images'
 import {
@@ -810,6 +811,19 @@ export async function POST(request: NextRequest) {
     }, logContext)
     canonicalTurnEnded = true
   }
+  let activeTurn: ReturnType<typeof beginChatTurn>
+  try {
+    activeTurn = beginChatTurn(body.sessionId, async text => {
+      const parts = [{ type: 'text', text }]
+      await persistMessage(body.sessionId, { role: 'user', parts })
+      await persistChatAgentLogEvent(chatSessionEvent(logContext, {
+        event_type: 'session/user-message', phase: 'chat', status: 'completed',
+        payload: { parts, text, steered: true },
+      }))
+    })
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : '会话正在运行' }, { status: 409 })
+  }
   try {
     sessionBeforeWrite = latestMessage
       ? await persistedChatSession(body.sessionId)
@@ -906,6 +920,8 @@ export async function POST(request: NextRequest) {
         writer.write({ type: 'text-start', id: textId })
         try {
           const result = await runCodexAgentTurn({
+            onTurnStarted: activeTurn.ready,
+            allowInterrupted: true,
             input: agentInput,
             ...codexThreadTurnOptions(
               storedThreadId,
@@ -921,6 +937,10 @@ export async function POST(request: NextRequest) {
               writer.write({ type: 'text-delta', id: textId, delta })
             },
           })
+          await activeTurn.drain()
+          const interrupted = result.status === 'interrupted'
+          const answerText = result.text || (interrupted ? '已停止生成' : '')
+          if (!result.text && interrupted) writer.write({ type: 'text-delta', id: textId, delta: answerText })
           writer.write({ type: 'text-end', id: textId })
           const images = await publishCodexGeneratedImages({
             threadId: result.threadId,
@@ -930,30 +950,32 @@ export async function POST(request: NextRequest) {
             return []
           })
           const parts = [
-            { type: 'text' as const, text: result.text },
+            { type: 'text' as const, text: answerText },
             ...codexImageMessageParts(images),
+            ...(interrupted ? [{ type: 'chat-status', id: 'chat-activity', phase: 'answer', state: 'complete', label: '已停止', detail: '用户停止了本次回复' }] : []),
           ]
           await persistMessage(body.sessionId, { role: 'assistant', parts })
           await persistChatAgentLogEvent(chatSessionEvent(logContext, {
             event_type: 'session/assistant-message',
             phase: 'execute',
             status: 'completed',
-            payload: { parts, text: result.text, threadId: result.threadId, turnId: result.turnId },
+            payload: { parts, text: answerText, threadId: result.threadId, turnId: result.turnId },
           }))
-          await finishCanonicalTurn({ kind: 'completed' })
+          await finishCanonicalTurn({ kind: interrupted ? 'interrupted' : 'completed' })
           await persistChatAgentLogEvent(chatSessionEvent(logContext, {
             event_type: 'session/turn-end',
             phase: 'chat',
-            status: 'completed',
-            payload: { kind: 'completed', threadId: result.threadId, turnId: result.turnId },
+            status: interrupted ? 'interrupted' : 'completed',
+            payload: { kind: interrupted ? 'interrupted' : 'completed', threadId: result.threadId, turnId: result.turnId },
           }))
           writeStatus({
             phase: 'answer',
             state: 'complete',
-            label: '已完成',
-            detail: '任务已完成',
+            label: interrupted ? '已停止' : '已完成',
+            detail: interrupted ? '已停止当前任务，可以继续发送消息' : '任务已完成',
           })
         } catch (error) {
+          await activeTurn.drain()
           writer.write({ type: 'text-end', id: textId })
           const message = error instanceof Error ? error.message : 'Chat response failed'
           writeStatus({
@@ -970,12 +992,16 @@ export async function POST(request: NextRequest) {
             payload: { error: message },
           }))
           throw error
+        } finally {
+          activeTurn.dispose()
         }
       },
       onError: error => error instanceof Error ? error.message : 'Chat response failed',
     })
     return createUIMessageStreamResponse({ stream })
   } catch (error) {
+    await activeTurn.drain()
+    activeTurn.dispose()
     const message = error instanceof Error ? error.message : 'Chat request failed'
     await finishCanonicalTurn({ kind: 'error', error: message })
     await persistChatAgentLogEvent(chatSessionEvent(logContext, {

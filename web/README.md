@@ -27,6 +27,12 @@ export WORKER_TOKEN="$(openssl rand -hex 32)"
 `127.0.0.1` 与 `localhost` 地址。完整启动、ready 文件格式、端口覆盖和
 进程所有权规则见项目根目录 `README.md`。
 
+## 聊天运行控制
+
+AI 助手执行任务时，页面版和浮动聊天均可继续输入并发送追加指令。
+追加指令通过 Codex 原生 `turn/steer` 进入当前任务；“停止生成”通过
+`turn/interrupt` 中断运行，保留部分回复，并允许继续发起新任务。
+
 ## Codex 工作空间权限
 
 Codex 工作会话使用 `ediora-workspace` 命名权限配置（Codex 0.162.1）：

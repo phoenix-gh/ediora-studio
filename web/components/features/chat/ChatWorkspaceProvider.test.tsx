@@ -20,6 +20,7 @@ import { ChatMessageView } from './ChatMessageView'
 const api = vi.hoisted(() => ({
   listChatSessions: vi.fn(),
   createChatSession: vi.fn(),
+  controlChatSession: vi.fn(),
   getChatSession: vi.fn(),
   deleteChatSession: vi.fn(),
   renameChatSession: vi.fn(),
@@ -115,6 +116,7 @@ describe('ChatWorkspaceProvider', () => {
     api.listChatSkills.mockResolvedValue([])
     api.listChatDrafts.mockResolvedValue([])
     api.createChatSession.mockResolvedValue(session7)
+    api.controlChatSession.mockResolvedValue(undefined)
     api.getChatSession.mockResolvedValue(detail(session7))
     api.deleteChatSession.mockResolvedValue(undefined)
     api.renameChatSession.mockImplementation(async (id: number, title: string) => ({
@@ -123,6 +125,27 @@ describe('ChatWorkspaceProvider', () => {
     }))
     api.streamChatReply.mockResolvedValue(undefined)
     api.createChatPipeline.mockResolvedValue({ job: { id: 81 } })
+  })
+
+  it('steers and stops a running session without opening a second reply stream', async () => {
+    let finish!: () => void
+    api.streamChatReply.mockImplementation(() => new Promise<void>(resolve => { finish = resolve }))
+    renderProvider()
+    await act(async () => { await current.openSession(7) })
+    let sending!: Promise<boolean>
+    await act(async () => { sending = current.submit('开始任务', [{ type: 'text', text: '开始任务' }]) })
+    await waitFor(() => expect(current.isActiveRunning).toBe(true))
+    await act(async () => {
+      expect(await current.submit('改成中文', [{ type: 'text', text: '改成中文' }])).toBe(true)
+    })
+    expect(api.controlChatSession).toHaveBeenCalledWith(7, 'steer', '改成中文')
+    expect(api.streamChatReply).toHaveBeenCalledTimes(1)
+    expect(current.messages.map(message => message.role)).toEqual(['user', 'user', 'assistant'])
+    expect(current.isActiveRunning).toBe(true)
+    await act(async () => { await current.stop() })
+    expect(api.controlChatSession).toHaveBeenCalledWith(7, 'interrupt', undefined)
+    await act(async () => { finish(); await sending })
+    expect(current.isActiveRunning).toBe(false)
   })
 
   it('deduplicates simultaneous session-list requests and shares the active session', async () => {

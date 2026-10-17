@@ -40,6 +40,7 @@ export function ChatWorkspace({ variant, onClose, onOpenFullChat, onResetSize, o
     messages,
     isActiveLoading,
     isActiveRunning,
+    isActiveControlling,
     activeError,
     skills,
     drafts,
@@ -49,6 +50,7 @@ export function ChatWorkspace({ variant, onClose, onOpenFullChat, onResetSize, o
     renameSession,
     removeSession,
     submit,
+    stop,
     respondToApproval,
     setSkillName,
     setDraftId,
@@ -134,7 +136,7 @@ export function ChatWorkspace({ variant, onClose, onOpenFullChat, onResetSize, o
     messageParts: ChatComposerMessagePart[],
     modelSelection: ChatModelSelection,
   ) {
-    if (!value.trim() || isActiveRunning) return false
+    if (!value.trim()) return false
     initializedRef.current = true
     try {
       return await submit(value, messageParts, modelSelection)
@@ -298,7 +300,9 @@ export function ChatWorkspace({ variant, onClose, onOpenFullChat, onResetSize, o
           skillName={state.composer.skillName}
           draftId={state.composer.draftId}
           pipelineInvocations={state.composer.pipelineInvocations}
-          disabled={isActiveRunning}
+          disabled={isActiveControlling}
+          running={isActiveRunning}
+          onStop={() => void stop()}
           variant={variant}
           onChange={setInput}
           onSkillNameChange={skillName => setSkillName(skillName ?? '')}

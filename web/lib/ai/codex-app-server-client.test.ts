@@ -2,7 +2,7 @@ import { statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { PassThrough } from 'node:stream'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import {
   createScriptedCodexPeer,
@@ -368,6 +368,30 @@ describe('Codex app-server client', () => {
       signal: controller.signal,
       onTextDelta: () => controller.abort(),
     })).rejects.toThrow(/cancel/i)
+  })
+
+  it('steers and interrupts an active native turn and returns its partial answer', async () => {
+    const peer = createScriptedCodexPeer({ holdTurn: true, agentText: 'partial answer' })
+    let control: import('./codex-app-server-client').CodexTurnControl | undefined
+    const result = runCodexAgentTurn({
+      transport: peer.transport, input: 'start', allowInterrupted: true,
+      onTurnStarted: value => { control = value },
+    })
+    void result.catch(() => undefined)
+    try {
+      await vi.waitFor(() => expect(control).toBeDefined())
+      await control!.steer('new instruction')
+      await control!.interrupt()
+      expect(requestByMethod(peer, 'turn/steer')?.params).toMatchObject({
+        threadId: 'thr_test', expectedTurnId: 'turn_test',
+        input: [{ type: 'text', text: 'new instruction', text_elements: [] }],
+      })
+      expect(requestByMethod(peer, 'turn/interrupt')?.params).toEqual({ threadId: 'thr_test', turnId: 'turn_test' })
+      await expect(result).resolves.toMatchObject({ status: 'interrupted', text: 'partial answer' })
+    } finally {
+      await peer.transport.close?.()
+      await result.catch(() => undefined)
+    }
   })
 
   it('stops an open turn when the bound worker signal aborts', async () => {
