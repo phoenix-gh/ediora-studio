@@ -226,6 +226,19 @@ export async function consumeUIMessageStream(
   }
 }
 
+export async function controlChatSession(sessionId: number, action: 'interrupt' | 'steer', text?: string) {
+  const response = await fetch(`/api/chat/${sessionId}/control`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action, ...(text ? { text } : {}) }),
+  })
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({})) as { error?: string }
+    throw new Error(body.error || '控制当前任务失败')
+  }
+  return response.json() as Promise<{ accepted: true; warning?: string }>
+}
+
 export async function streamChatReply({
   sessionId,
   messages,

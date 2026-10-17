@@ -72,6 +72,7 @@ vi.mock('@/lib/skills/registry', () => ({
 }))
 
 import { POST } from './route'
+import { controlChatTurn } from '@/lib/ai/chat-turn-control'
 
 async function flushRouteWork() {
   for (let index = 0; index < 5; index += 1) {
@@ -97,6 +98,27 @@ async function postChat(text = 'hello') {
 }
 
 describe('POST /api/chat Codex app-server agent', () => {
+  it('persists accepted steering before the interrupted partial assistant reply', async () => {
+    api.peer = createScriptedCodexPeer({ holdTurn: true, agentText: 'partial reply' })
+    const response = await POST(new Request('http://localhost/api/chat', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId: 12, messages: [{ role: 'user', parts: [{ type: 'text', text: 'start' }] }] }),
+    }) as never)
+    expect(response.status).toBe(200)
+    await vi.waitFor(() => expect(requestByMethod(api.peer!, 'turn/start')).toBeDefined())
+    await controlChatTurn(12, 'steer', 'change direction')
+    await controlChatTurn(12, 'interrupt')
+    await flushRouteWork()
+    const persisted = vi.mocked(fetch).mock.calls
+      .filter(([url]) => String(url).endsWith('/messages'))
+      .map(([, init]) => JSON.parse(String(init?.body)))
+    expect(persisted.map(message => [message.role, message.text])).toEqual([
+      ['user', 'start'], ['user', 'change direction'], ['assistant', 'partial reply'],
+    ])
+    expect(api.appendAgentSessionEvent).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'turn/end', data: { reason: { kind: 'interrupted' } },
+    }))
+  })
   beforeEach(() => {
     process.env.API_URL = 'http://api:8000/api'
     process.env.WORKER_TOKEN = 'test-worker-token-at-least-32-characters'
@@ -149,7 +171,7 @@ describe('POST /api/chat Codex app-server agent', () => {
     }))
     expect(requestByMethod(api.peer!, 'turn/start')?.params).not.toHaveProperty('effort')
     expect(requestByMethod(api.peer!, 'thread/start')?.params).toEqual(expect.objectContaining({
-      config: {
+      config: expect.objectContaining({
         mcp_servers: {
           ediora: {
             url: 'http://api:8000/mcp',
@@ -160,7 +182,7 @@ describe('POST /api/chat Codex app-server agent', () => {
             default_tools_approval_mode: 'approve',
           },
         },
-      },
+      }),
     }))
     const turnEnd = api.appendAgentSessionEvent.mock.calls
       .map(call => call[0] as { type?: string, data?: { reason?: unknown } })
