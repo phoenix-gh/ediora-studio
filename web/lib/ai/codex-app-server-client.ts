@@ -38,6 +38,13 @@ export type CodexAgentTurnResult = {
 
 export type CodexMcpToolApprovalMode = 'auto' | 'prompt' | 'writes' | 'approve'
 
+export type CodexTurnControl = {
+  threadId: string
+  turnId: string
+  steer: (text: string) => Promise<void>
+  interrupt: () => Promise<void>
+}
+
 export type CodexMcpHttpServer = {
   url: string
   http_headers?: Record<string, string>
@@ -65,6 +72,8 @@ export type RunCodexAgentTurnOptions = {
   onNotification?: (notification: CodexNotification) => void
   onTextDelta?: (delta: string) => void
   onThreadId?: (threadId: string) => void | Promise<void>
+  onTurnStarted?: (control: CodexTurnControl) => void
+  allowInterrupted?: boolean
   keepAlive?: boolean
   signal?: AbortSignal
 }
@@ -152,7 +161,6 @@ export async function runCodexAgentTurn(
     ?? await (options.createTransport ?? spawnCodexAppServerTransport)()
   const pending = new Map<number, PendingRequest>()
   let nextId = 0
-  let reading: Promise<void> | undefined
   let closed = false
   const deltas: string[] = []
   const completedItems: Record<string, unknown>[] = []
@@ -238,7 +246,7 @@ export async function runCodexAgentTurn(
     return failure
   }
 
-  reading = (async () => {
+  const reading = (async () => {
     try {
       for await (const line of transport.lines) {
         const trimmed = line.trim()
@@ -333,11 +341,23 @@ export async function runCodexAgentTurn(
 
     const turnStart = record(await request('turn/start', turnParams))
     const startedTurnId = textField(record(turnStart.turn).id) ?? null
+    if (startedTurnId) {
+      options.onTurnStarted?.({
+        threadId,
+        turnId: startedTurnId,
+        steer: async text => {
+          await request('turn/steer', { threadId, expectedTurnId: startedTurnId, input: [userInput(text)] })
+        },
+        interrupt: async () => {
+          await request('turn/interrupt', { threadId, turnId: startedTurnId })
+        },
+      })
+    }
     await terminalWait
     if (!terminal) throw new Error('Codex turn ended without a terminal notification')
 
     const status = terminal.status
-    if (status !== 'completed') {
+    if (status !== 'completed' && !(options.allowInterrupted && status === 'interrupted')) {
       throw new Error(turnErrorMessage(terminal.notification, status))
     }
 
@@ -358,6 +378,8 @@ export async function runCodexAgentTurn(
     }
   } finally {
     closed = true
+    for (const waiter of pending.values()) waiter.reject(new Error('Codex turn has ended'))
+    pending.clear()
     signal?.removeEventListener('abort', abortTurn)
     if (!options.keepAlive) await transport.close?.()
     await reading?.catch(() => undefined)

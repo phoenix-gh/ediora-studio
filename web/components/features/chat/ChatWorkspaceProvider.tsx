@@ -14,6 +14,7 @@ import {
 import {
   createChatPipeline,
   createChatSession,
+  controlChatSession,
   deleteChatSession,
   getChatSession,
   listChatDrafts,
@@ -54,6 +55,7 @@ export type ChatWorkspaceContextValue = {
   messages: DisplayMessage[]
   isActiveLoading: boolean
   isActiveRunning: boolean
+  isActiveControlling: boolean
   activeError: string | null
   skills: ChatSkill[]
   drafts: ChatDraft[]
@@ -62,6 +64,7 @@ export type ChatWorkspaceContextValue = {
   startNewConversation: () => void
   renameSession: (sessionId: number, title: string) => Promise<void>
   removeSession: (sessionId: number) => Promise<void>
+  stop: () => Promise<void>
   submit: (
     text: string,
     messageParts: ChatComposerMessagePart[],
@@ -113,6 +116,8 @@ export function ChatWorkspaceProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<ChatWorkspaceState>(initialState)
   const [skills, setSkills] = useState<ChatSkill[]>([])
   const [drafts, setDrafts] = useState<ChatDraft[]>([])
+  const [controllingSessions, setControllingSessions] = useState<Set<number>>(() => new Set())
+  const controllingSessionsRef = useRef(new Set<number>())
   const loadedSessionsRef = useRef(new Set<number>())
   const sessionRequestsRef = useRef(new Map<number, Promise<void>>())
   const sessionsRequestRef = useRef<Promise<ChatSession[]> | null>(null)
@@ -374,6 +379,40 @@ export function ChatWorkspaceProvider({ children }: { children: ReactNode }) {
 
   const modelSelectionRef = useRef<ChatModelSelection | undefined>(undefined)
 
+  const controlRunningSession = useCallback(async (sessionId: number, action: 'interrupt' | 'steer', text?: string) => {
+    if (controllingSessionsRef.current.has(sessionId)) return false
+    controllingSessionsRef.current.add(sessionId)
+    setControllingSessions(new Set(controllingSessionsRef.current))
+    setSessionError(sessionId, null)
+    try {
+      const result = await controlChatSession(sessionId, action, text)
+      if (result?.warning) setSessionError(sessionId, result.warning)
+      if (action === 'steer' && text) {
+        const userMessage = makeLocalMessage('user', [{ type: 'text', text }])
+        updateSession(sessionId, messages => {
+          const next = [...messages]
+          const last = next.at(-1)
+          next.splice(last?.role === 'assistant' ? next.length - 1 : next.length, 0, userMessage)
+          return next
+        })
+      }
+      return true
+    } catch (error) {
+      setSessionError(sessionId, errorMessage(error, '控制当前任务失败'))
+      // Reconcile a turn that finished while the control request was in flight.
+      if (!inlineStreamSessionIdsRef.current.has(sessionId)) await loadSession(sessionId, true).catch(() => undefined)
+      return false
+    } finally {
+      controllingSessionsRef.current.delete(sessionId)
+      setControllingSessions(new Set(controllingSessionsRef.current))
+    }
+  }, [loadSession, setSessionError, updateSession])
+
+  const stop = useCallback(async () => {
+    if (state.activeSessionId === null) return
+    await controlRunningSession(state.activeSessionId, 'interrupt')
+  }, [controlRunningSession, state.activeSessionId])
+
   const submit = useCallback(async (
     text: string,
     messageParts: ChatComposerMessagePart[],
@@ -384,7 +423,9 @@ export function ChatWorkspaceProvider({ children }: { children: ReactNode }) {
     if (!trimmed) return false
     const sessionId = await ensureActiveSession(trimmed)
     const key = sessionKey(sessionId)
-    if (state.runningBySession[key]) return false
+    if (state.runningBySession[key] || inlineStreamSessionIdsRef.current.has(sessionId)) {
+      return controlRunningSession(sessionId, 'steer', trimmed)
+    }
 
     const pipelineInvocations = state.composer.pipelineInvocations
     if (pipelineInvocations.length >= 2) {
@@ -466,6 +507,7 @@ export function ChatWorkspaceProvider({ children }: { children: ReactNode }) {
       setSessionRunning(sessionId, false)
     }
   }, [
+    controlRunningSession,
     ensureActiveSession,
     loadSession,
     publishArtifactEvent,
@@ -584,6 +626,7 @@ export function ChatWorkspaceProvider({ children }: { children: ReactNode }) {
     messages: activeKey ? state.messagesBySession[activeKey] ?? [] : [],
     isActiveLoading: activeKey ? Boolean(state.loadingBySession[activeKey]) : false,
     isActiveRunning: activeKey ? Boolean(state.runningBySession[activeKey]) : false,
+    isActiveControlling: state.activeSessionId !== null && controllingSessions.has(state.activeSessionId),
     activeError: activeKey ? state.errorsBySession[activeKey] ?? null : null,
     skills,
     drafts,
@@ -593,6 +636,7 @@ export function ChatWorkspaceProvider({ children }: { children: ReactNode }) {
     renameSession,
     removeSession,
     submit,
+    stop,
     respondToApproval,
     setSkillName: skillName => setState(current => ({
       ...current,
@@ -608,6 +652,8 @@ export function ChatWorkspaceProvider({ children }: { children: ReactNode }) {
     })),
     retrySession,
   }), [
+    controllingSessions,
+    stop,
     activeKey,
     drafts,
     openSession,
