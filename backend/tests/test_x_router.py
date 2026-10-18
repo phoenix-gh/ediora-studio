@@ -313,8 +313,7 @@ from unittest.mock import ANY, patch, AsyncMock
 
 def _fake_post(tid="111", views=100, published_at=None, is_reply=False, media=None):
     from feedgrab_client import ParsedPost
-    # Default to "now" so the post falls inside the 24h cutoff window
-    # used by _collect_one's first-time collect path.
+    # Default to a recent post inside the rolling 48-hour window.
     if published_at is None:
         published_at = datetime.now(timezone.utc) - timedelta(minutes=5)
     return ParsedPost(
@@ -686,11 +685,11 @@ def test_posts_filter_by_subscription(client):
     assert {p["tweet_id"] for p in posts} == {"111"}
 
 
-# ── Incremental collect cutoff ────────────────────────────────────────────────
+# ── Rolling metrics refresh window ───────────────────────────────────────────
 
 
-def test_collect_first_time_passes_24h_cutoff_to_grab(client):
-    """No posts yet → grab_timeline called with since ≈ now − 24h."""
+def test_collect_first_time_passes_48h_cutoff_to_grab(client):
+    """No posts yet → grab_timeline called with since ≈ now − 48h."""
     sub = client.post(
         "/api/x/subscriptions", json={"url": "https://x.com/foo"}).json()
 
@@ -704,13 +703,11 @@ def test_collect_first_time_passes_24h_cutoff_to_grab(client):
     since = kwargs["since"]
     now = datetime.now(timezone.utc)
     delta = (now - since).total_seconds()
-    # Should be ~24h ± a few seconds
-    assert 23 * 3600 < delta < 25 * 3600, f"unexpected cutoff: {since} (delta={delta})"
+    assert 48 * 3600 <= delta < 48 * 3600 + 10, f"unexpected cutoff: {since} (delta={delta})"
 
 
-def test_collect_incremental_passes_hour_aligned_cutoff(client):
-    """After a prior collect, grab_timeline gets since = hour-aligned latest
-    stored published_at."""
+def test_collect_revisits_full_48h_window_after_recent_post(client):
+    """Recent posts must not prevent refreshing other posts inside 48 hours."""
     sub = client.post(
         "/api/x/subscriptions", json={"url": "https://x.com/foo"}).json()
 
@@ -722,13 +719,67 @@ def test_collect_incremental_passes_hour_aligned_cutoff(client):
                new=AsyncMock(return_value=[seed])):
         client.post(f"/api/x/subscriptions/{sub['id']}/collect-sync")
 
-    # Second call — verify since= is seed_at hour-aligned
+    # Second call still refreshes the entire rolling window.
     mock = AsyncMock(return_value=[])
     with patch("routers.x.grab_timeline", new=mock):
         client.post(f"/api/x/subscriptions/{sub['id']}/collect-sync")
 
     _, kwargs = mock.await_args
-    assert kwargs["since"] == seed_at.replace(minute=0, second=0, microsecond=0)
+    delta = (datetime.now(timezone.utc) - kwargs["since"]).total_seconds()
+    assert 48 * 3600 <= delta < 48 * 3600 + 10
+
+
+def test_collect_skips_old_posts_and_refreshes_recent_metrics(client):
+    sub = client.post(BASE, json={"url": "https://x.com/foo"}).json()
+    now = datetime.now(timezone.utc)
+    recent = _fake_post("recent", views=10, published_at=now - timedelta(hours=47))
+    old = _fake_post("old", views=20, published_at=now - timedelta(hours=49))
+    with patch("routers.x.grab_timeline", new=AsyncMock(return_value=[recent, old])):
+        client.post(f"{BASE}/{sub['id']}/backfill", json={"days": 7})
+    with patch("routers.x.grab_timeline", new=AsyncMock(return_value=[
+        _fake_post("recent", views=100, published_at=recent.published_at),
+        _fake_post("old", views=200, published_at=old.published_at),
+        _fake_post("old-unseen", published_at=now - timedelta(hours=50)),
+    ])):
+        response = client.post(f"{BASE}/{sub['id']}/collect-sync")
+    assert response.status_code == 200, response.text
+    assert response.json()["new_posts"] == 0
+    posts = {p["tweet_id"]: p for p in client.get(f"/api/x/posts?subscription_id={sub['id']}&hours=168").json()}
+    assert posts["recent"]["views"] == 100
+    assert posts["old"]["views"] == 20
+    assert "old-unseen" not in posts
+
+
+def test_backfill_does_not_refresh_expired_metrics(client):
+    sub = client.post(BASE, json={"url": "https://x.com/foo"}).json()
+    published_at = datetime.now(timezone.utc) - timedelta(hours=49)
+    for views in [10, 100]:
+        with patch("routers.x.grab_timeline", new=AsyncMock(return_value=[_fake_post("old", views=views, published_at=published_at)])):
+            response = client.post(f"{BASE}/{sub['id']}/backfill", json={"days": 7})
+            assert response.status_code == 200, response.text
+    posts = client.get(f"/api/x/posts?subscription_id={sub['id']}&hours=168").json()
+    assert posts[0]["views"] == 10
+
+
+@pytest.mark.parametrize("kind", ["timeline", "search"])
+def test_collection_includes_48h_boundary_but_excludes_older_posts(client, kind):
+    from unittest.mock import Mock
+    now = datetime.now(timezone.utc)
+    body = {"url": "https://x.com/foo"} if kind == "timeline" else {"kind": "search", "raw_query": "lang:zh"}
+    sub = client.post(BASE, json=body).json()
+    fetch = "routers.x.grab_timeline" if kind == "timeline" else "routers.x.search_top"
+    posts = [
+        _fake_post("boundary", published_at=now - timedelta(hours=48)),
+        _fake_post("expired", published_at=now - timedelta(hours=48, microseconds=1)),
+    ]
+    clock = Mock(wraps=datetime)
+    clock.now.return_value = now
+    with patch("routers.x.datetime", clock), patch(fetch, new=AsyncMock(return_value=posts)):
+        response = client.post(f"{BASE}/{sub['id']}/collect-sync")
+    assert response.status_code == 200, response.text
+    assert response.json()["new_posts"] == 1
+    stored = client.get(f"/api/x/posts?subscription_id={sub['id']}").json()
+    assert [p["tweet_id"] for p in stored] == ["boundary"]
 
 
 def test_backfill_passes_requested_day_cutoff_to_grab(client):

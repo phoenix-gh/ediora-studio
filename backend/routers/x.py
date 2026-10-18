@@ -20,6 +20,7 @@ from models import (
 from routers.x_accounts import ensure_x_credential_sessions
 
 router = APIRouter(prefix="/x", tags=["x"])
+X_POST_REFRESH_WINDOW = timedelta(hours=48)
 
 
 # ─── Schemas ─────────────────────────────────────────────────────────────────
@@ -397,6 +398,9 @@ def _upsert_post_stmt(db: AsyncSession, sub_id: int, p):
             "collected_at": stmt.excluded.collected_at,
             "is_reply": stmt.excluded.is_reply,
         },
+        # Historical backfills may insert old posts, but must not refresh
+        # metrics of posts whose 48-hour observation window has closed.
+        where=XPost.published_at >= datetime.now(timezone.utc) - X_POST_REFRESH_WINDOW,
     )
     return stmt
 
@@ -406,27 +410,12 @@ def _upsert_post_stmt(db: AsyncSession, sub_id: int, p):
 from feedgrab_client import grab_timeline, search_x, search_top, auth_status
 
 
-async def _compute_collect_cutoff(db: AsyncSession, sub_id: int) -> datetime:
-    """First-time collect → last 24h. Subsequent collects → hour-aligned
-    timestamp of latest stored post (re-includes the partial hour so newer
-    tweets posted in the same hour as the previous run are not missed).
-    """
-    latest = (await db.execute(
-        select(func.max(XPost.published_at))
-        .where(XPost.subscription_id == sub_id)
-    )).scalar()
-    if latest is None:
-        return datetime.now(timezone.utc) - timedelta(hours=24)
-    if latest.tzinfo is None:
-        latest = latest.replace(tzinfo=timezone.utc)
-    return latest.replace(minute=0, second=0, microsecond=0)
-
-
 async def _collect_one(
     db: AsyncSession,
     sub: XSubscription,
     cutoff: datetime | None = None,
 ) -> int:
+    effective_cutoff = cutoff or datetime.now(timezone.utc) - X_POST_REFRESH_WINDOW
     try:
         if sub.kind == "search":
             posts = await search_top(
@@ -435,10 +424,14 @@ async def _collect_one(
                 extra_terms=sub.extra_terms, sort=sub.sort, limit=sub.max_results,
             )
         else:
-            # Cutoff is pushed into feedgrab's paginator so it stops fetching
-            # once it crosses the boundary — no after-the-fact filtering needed.
-            effective_cutoff = cutoff or await _compute_collect_cutoff(db, sub.id)
+            # Push the cutoff into pagination to avoid fetching older pages.
             posts = await grab_timeline(sub.url, since=effective_cutoff)
+        # Also enforce the boundary for search results and out-of-order
+        # timeline results (for example, pinned historical posts).
+        posts = [p for p in posts if (
+            p.published_at if p.published_at.tzinfo is not None
+            else p.published_at.replace(tzinfo=timezone.utc)
+        ) >= effective_cutoff]
     except Exception as e:
         sub.last_error = str(e)[:500]
         await db.commit()
