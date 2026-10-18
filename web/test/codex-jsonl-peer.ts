@@ -93,6 +93,15 @@ export function createScriptedCodexPeer(script: ScriptedCodexPeerOptions = {}) {
   })
 
   const handle = (message: JsonRpcMessage) => {
+    if (message.method === 'turn/steer' && message.id !== undefined) {
+      reply({ id: message.id, result: { turnId } })
+      return
+    }
+    if (message.method === 'turn/interrupt' && message.id !== undefined) {
+      reply({ id: message.id, result: {} })
+      reply({ method: 'turn/completed', params: { threadId, turn: turnPayload('interrupted') } })
+      return
+    }
     if (message.method === 'initialize' && message.id !== undefined) {
       reply({
         id: message.id,

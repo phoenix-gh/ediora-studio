@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -28,7 +28,7 @@ function placeCaretAtEnd(editor: HTMLElement) {
   selection?.addRange(range)
 }
 
-function Harness({ onSubmit = () => true }: { onSubmit?: ChatComposerProps['onSubmit'] }) {
+function Harness({ onSubmit = () => true, running = false, onStop }: { onSubmit?: ChatComposerProps['onSubmit']; running?: boolean; onStop?: () => void }) {
   const [value, setValue] = useState('帮我用(')
   const [invocations, setInvocations] = useState<SubmittedSkillInvocation[]>([])
 
@@ -42,6 +42,8 @@ function Harness({ onSubmit = () => true }: { onSubmit?: ChatComposerProps['onSu
       draftId={null}
       pipelineInvocations={invocations}
       disabled={false}
+      running={running}
+      onStop={onStop}
       variant="page"
       onChange={setValue}
       onSkillNameChange={() => undefined}
@@ -58,6 +60,37 @@ function Harness({ onSubmit = () => true }: { onSubmit?: ChatComposerProps['onSu
 }
 
 describe('ChatComposer', () => {
+  it('restores an instruction the running task did not accept', async () => {
+    render(<Harness running onSubmit={async () => false} />)
+    const editor = screen.getByRole('textbox', { name: '消息内容' })
+    fireEvent.click(screen.getByRole('button', { name: '追加指令' }))
+    await waitFor(() => expect(editor.textContent).toBe('帮我用('))
+  })
+  it('does not overwrite a newer instruction when an earlier submission finishes', async () => {
+    let finishFirst!: (accepted: boolean) => void
+    const onSubmit = vi.fn()
+      .mockImplementationOnce(() => new Promise<boolean>(resolve => { finishFirst = resolve }))
+      .mockResolvedValue(true)
+    render(<Harness running onSubmit={onSubmit} />)
+    const editor = screen.getByRole('textbox', { name: '消息内容' })
+    fireEvent.click(screen.getByRole('button', { name: '追加指令' }))
+    editor.textContent = '改成中文'
+    fireEvent.input(editor)
+    fireEvent.click(screen.getByRole('button', { name: '追加指令' }))
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(2))
+    await act(async () => { finishFirst(false) })
+    expect(editor.textContent).toBe('')
+  })
+  it('allows follow-up instructions and exposes stop while the agent is running', () => {
+    const onStop = vi.fn()
+    const onSubmit = vi.fn(() => true)
+    render(<Harness running onStop={onStop} onSubmit={onSubmit} />)
+    expect(screen.getByRole('textbox', { name: '消息内容' })).toHaveAttribute('contenteditable', 'true')
+    fireEvent.click(screen.getByRole('button', { name: '停止生成' }))
+    expect(onStop).toHaveBeenCalledTimes(1)
+    fireEvent.click(screen.getByRole('button', { name: '追加指令' }))
+    expect(onSubmit).toHaveBeenCalledTimes(1)
+  })
   it('uses a bottom Skill sheet on narrow screens', () => {
     const originalMatchMedia = window.matchMedia
     Object.defineProperty(window, 'matchMedia', {

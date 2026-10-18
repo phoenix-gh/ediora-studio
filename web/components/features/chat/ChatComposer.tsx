@@ -1,7 +1,7 @@
 'use client'
 
 import { useLayoutEffect, useRef, useState, type ClipboardEvent, type FormEvent, type KeyboardEvent } from 'react'
-import { Loader2, MessageSquarePlus, Send } from 'lucide-react'
+import { Loader2, MessageSquarePlus, Send, Square } from 'lucide-react'
 
 import { ChatContextPicker } from '@/components/features/chat/ChatContextPicker'
 import { ChatModelControls, useChatModelSelection } from '@/components/features/chat/ChatModelControls'
@@ -163,6 +163,8 @@ export type ChatComposerProps = {
   draftId: number | null
   pipelineInvocations: SubmittedSkillInvocation[]
   disabled: boolean
+  running?: boolean
+  onStop?: () => void
   variant: 'page' | 'floating'
   onChange: (value: string) => void
   onSkillNameChange: (skillName: string | undefined) => void
@@ -183,6 +185,8 @@ export function ChatComposer({
   draftId,
   pipelineInvocations,
   disabled,
+  running = false,
+  onStop,
   variant,
   onChange,
   onSkillNameChange,
@@ -200,6 +204,7 @@ export function ChatComposer({
   } = useChatModelSelection()
   const editorRef = useRef<HTMLDivElement>(null)
   const insertionRangeRef = useRef<Range | null>(null)
+  const submissionSequenceRef = useRef(0)
 
   useLayoutEffect(() => {
     const editor = editorRef.current
@@ -223,6 +228,7 @@ export function ChatComposer({
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (disabled || !value.trim()) return
+    const submissionSequence = ++submissionSequenceRef.current
     const editor = editorRef.current
     if (!editor) return
     const messageParts = composerMessageParts(editor, pipelineInvocations)
@@ -233,6 +239,7 @@ export function ChatComposer({
     onChange('')
 
     const submitted = await onSubmit(value, messageParts, modelSelection)
+    if (submissionSequence !== submissionSequenceRef.current) return
     if (submitted) {
       onPipelineInvocationsChange([])
       return
@@ -280,7 +287,7 @@ export function ChatComposer({
         return
       }
     }
-    if (event.key === '@'
+    if (event.key === '@' && !running
       && !event.metaKey
       && !event.ctrlKey
       && !event.altKey
@@ -400,7 +407,7 @@ export function ChatComposer({
               onKeyDown={handleKeyDown}
               suppressContentEditableWarning
               className="max-h-40 min-h-12 flex-1 overflow-y-auto whitespace-pre-wrap break-words bg-transparent py-1 text-sm leading-6 outline-none before:pointer-events-none before:text-foreground-subtle before:content-[attr(data-placeholder)] data-[empty=false]:before:content-none data-[disabled=true]:cursor-not-allowed"
-              data-placeholder="问问本地信息源里的内容…"
+              data-placeholder={running ? '补充或调整当前任务…' : '问问本地信息源里的内容…'}
               data-disabled={disabled}
             />
           </div>
@@ -409,7 +416,7 @@ export function ChatComposer({
               skills={skills}
               invocations={pipelineInvocations}
               open={skillPickerOpen}
-              disabled={disabled}
+              disabled={disabled || running}
               renderInvocations={false}
               showTrigger={false}
               anchor={() => editorRef.current}
@@ -420,7 +427,7 @@ export function ChatComposer({
             <ChatModelControls
               models={models}
               selection={modelSelection}
-              disabled={disabled}
+              disabled={disabled || running}
               onModelChange={setModel}
               onReasoningEffortChange={setReasoningEffort}
             />
@@ -430,11 +437,18 @@ export function ChatComposer({
               showSkills={false}
               skillName={skillName || undefined}
               draftId={draftId ?? undefined}
-              disabled={disabled}
+              disabled={disabled || running}
               footerAction={(
-                <Button type="submit" size="icon" disabled={!value.trim() || disabled} title="发送消息" aria-label="发送消息">
-                  {disabled ? <Loader2 className="animate-spin" /> : <Send />}
-                </Button>
+                <div className="flex items-center gap-2">
+                  {running && onStop && (
+                    <Button type="button" size="icon" variant="outline" disabled={disabled} onClick={onStop} title="停止生成" aria-label="停止生成">
+                      <Square />
+                    </Button>
+                  )}
+                  <Button type="submit" size="icon" disabled={!value.trim() || disabled} title={running ? '追加指令' : '发送消息'} aria-label={running ? '追加指令' : '发送消息'}>
+                    {disabled ? <Loader2 className="animate-spin" /> : <Send />}
+                  </Button>
+                </div>
               )}
               onSkillNameChange={onSkillNameChange}
               onDraftIdChange={onDraftIdChange}
@@ -442,7 +456,7 @@ export function ChatComposer({
           </div>
         </div>
         <p className="mt-2 flex items-center gap-1.5 text-[11px] text-foreground-subtle">
-          <MessageSquarePlus className="h-3 w-3" />新对话会在发送第一条消息时创建。
+          <MessageSquarePlus className="h-3 w-3" />{running ? '正在执行，可追加指令或停止当前任务。' : '新对话会在发送第一条消息时创建。'}
         </p>
       </div>
     </form>
